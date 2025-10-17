@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 
 // === CONFIG ===
-const GAS_BASE =
-  "https://script.google.com/macros/s/AKfycbyHiEikjzV9zB6nF8Hz8-HkTm-9_mz9fN9IX6cjDo6bRseaftiXzH54zrrcAB4/exec";
+// Usa el proxy de Vercel (creado en /api/gas-proxy)
+const GAS_BASE = "/api/gas-proxy";
 const STAND_COUNT = 4;
 
 // === HELPERS ===
@@ -18,19 +18,27 @@ function hideQueryString(): void {
   }
 }
 
-async function fetchJson<T = any>(url: string, opts: RequestInit = {}): Promise<T> {
+async function fetchJson<T = unknown>(url: string, opts: RequestInit = {}): Promise<T> {
   const res = await fetch(url, opts);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const text = await res.text(); // leer una vez
   try {
-    return (await res.json()) as T;
+    return JSON.parse(text) as T;
   } catch {
-    return {} as T;
+    return { raw: text } as unknown as T;
   }
 }
 
 // === TYPES ===
 interface Visit {
   stand: number;
+  ts: string;
+}
+
+interface PendingReport {
+  anonId: string;
+  visits: Visit[];
   ts: string;
 }
 
@@ -49,7 +57,92 @@ export default function App() {
   );
   const [status, setStatus] = useState<string>("");
 
-  // Load on mount
+  // === Helper functions ===
+
+  const visitsUniqueCount = (visArr: Visit[]): number =>
+    new Set(visArr.map((v) => v.stand)).size;
+
+  const clearPendingReport = useCallback((id: string) => {
+    const pending: PendingReport[] = JSON.parse(localStorage.getItem("pendingReports") || "[]");
+    const filtered = pending.filter((p) => p.anonId !== id);
+    localStorage.setItem("pendingReports", JSON.stringify(filtered));
+  }, []);
+
+  const queuePendingReport = useCallback((id: string, visitsToReport: Visit[]) => {
+    const pending: PendingReport[] = JSON.parse(localStorage.getItem("pendingReports") || "[]");
+    pending.push({ anonId: id, visits: visitsToReport, ts: new Date().toISOString() });
+    localStorage.setItem("pendingReports", JSON.stringify(pending));
+  }, []);
+
+  const ensureAnonId = useCallback(async (): Promise<string> => {
+    const cached = localStorage.getItem("anonId");
+    if (cached) return cached;
+
+    const url = `${GAS_BASE}?action=newAnon`;
+    const body = await fetchJson<{ id?: number }>(url);
+    if (!body || !body.id) throw new Error("No se obtuvo anonId del backend");
+    localStorage.setItem("anonId", String(body.id));
+    return String(body.id);
+  }, []);
+
+  const reportComplete = useCallback(
+    async (id: string, visitsToReport: Visit[]): Promise<void> => {
+      if (!id) throw new Error("anonId missing");
+
+      const payload = {
+        action: "reportComplete",
+        anonId: id,
+        visits: visitsToReport,
+        timestamp: new Date().toISOString(),
+      };
+
+      console.log("📤 Enviando reporte completo a GAS:", payload);
+
+      const res = await fetch(GAS_BASE, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json().catch(() => ({}));
+
+      if (data && (data.success || data.status === "ok")) {
+        console.log("✅ Reporte recibido por GAS");
+        clearPendingReport(id);
+        localStorage.setItem("reported", "true");
+        setReported(true);
+      } else {
+        throw new Error("Backend no devolvió éxito");
+      }
+    },
+    [clearPendingReport]
+  );
+
+  const flushPending = useCallback(async () => {
+    const pending: PendingReport[] = JSON.parse(localStorage.getItem("pendingReports") || "[]");
+    for (const p of pending) {
+      try {
+        await fetch(GAS_BASE, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "reportComplete",
+            anonId: p.anonId,
+            visits: p.visits,
+            timestamp: p.ts,
+          }),
+        });
+        clearPendingReport(p.anonId);
+        setStatus("Se sincronizó un reporte pendiente.");
+      } catch (e) {
+        console.warn("No se pudo sincronizar reporte pendiente", e);
+      }
+    }
+  }, [clearPendingReport]);
+
+  // === Effects ===
+
   useEffect(() => {
     const standParam = qsGet("stand");
     hideQueryString();
@@ -72,9 +165,8 @@ export default function App() {
         setStatus("Error de red o servidor. Intentando en segundo plano...");
       }
     })();
-  }, []);
+  }, [ensureAnonId]);
 
-  // Persist visits and trigger report automatically when 4 stands visited
   useEffect(() => {
     if (!anonId) return;
     localStorage.setItem("visits", JSON.stringify(visits));
@@ -95,21 +187,15 @@ export default function App() {
           setStatus("⚠️ Error de red, se guardó el reporte pendiente.");
         });
     }
-  }, [visits, anonId]);
+  }, [visits, anonId, reported, reportComplete, queuePendingReport]);
 
-  async function ensureAnonId(): Promise<string> {
-    const cached = localStorage.getItem("anonId");
-    if (cached) return cached;
-    const url = `${GAS_BASE}?action=newAnon`;
-    const body = await fetchJson<{ id: number }>(url);
-    if (!body || !body.id) throw new Error("No se obtuvo anonId del backend");
-    localStorage.setItem("anonId", String(body.id));
-    return String(body.id);
-  }
+  useEffect(() => {
+    const onOnline = () => flushPending();
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+  }, [flushPending]);
 
-  function visitsUniqueCount(visArr: Visit[]): number {
-    return new Set(visArr.map((v) => v.stand)).size;
-  }
+  // === Actions ===
 
   async function handleStandVisit(stand: number): Promise<void> {
     setStatus(`Registrando visita al stand ${stand}...`);
@@ -123,77 +209,6 @@ export default function App() {
     setStatus(`Visita al stand ${stand} registrada localmente.`);
   }
 
-  async function reportComplete(id: string, visitsToReport: Visit[]): Promise<void> {
-    if (!id) throw new Error("anonId missing");
-
-    const payload = {
-      action: "reportComplete",
-      anonId: id,
-      visits: visitsToReport,
-      timestamp: new Date().toISOString(),
-    };
-
-    console.log("📤 Enviando reporte completo a GAS:", payload);
-
-    const res = await fetch(GAS_BASE, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json().catch(() => ({}));
-
-    if (data && (data.success || data.status === "ok")) {
-      console.log("✅ Reporte recibido por GAS");
-      clearPendingReport(id);
-      localStorage.setItem("reported", "true");
-      setReported(true);
-    } else {
-      throw new Error("Backend no devolvió éxito");
-    }
-  }
-
-  function queuePendingReport(id: string, visitsToReport: Visit[]) {
-    const pending = JSON.parse(localStorage.getItem("pendingReports") || "[]");
-    pending.push({ anonId: id, visits: visitsToReport, ts: new Date().toISOString() });
-    localStorage.setItem("pendingReports", JSON.stringify(pending));
-  }
-
-  function clearPendingReport(id: string) {
-    const pending = JSON.parse(localStorage.getItem("pendingReports") || "[]");
-    const filtered = pending.filter((p: any) => p.anonId !== id);
-    localStorage.setItem("pendingReports", JSON.stringify(filtered));
-  }
-
-  async function flushPending() {
-    const pending = JSON.parse(localStorage.getItem("pendingReports") || "[]");
-    for (const p of pending) {
-      try {
-        await fetch(GAS_BASE, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "reportComplete",
-            anonId: p.anonId,
-            visits: p.visits,
-            timestamp: p.ts,
-          }),
-        });
-        clearPendingReport(p.anonId);
-        setStatus("Se sincronizó un reporte pendiente.");
-      } catch (e) {
-        console.warn("No se pudo sincronizar reporte pendiente", e);
-      }
-    }
-  }
-
-  useEffect(() => {
-    const onOnline = () => flushPending();
-    window.addEventListener("online", onOnline);
-    return () => window.removeEventListener("online", onOnline);
-  }, []);
-
   function resetAll() {
     localStorage.clear();
     setAnonId(null);
@@ -201,6 +216,8 @@ export default function App() {
     setReported(false);
     setStatus("Cache limpiado.");
   }
+
+  // === Render ===
 
   return (
     <div className="App">
