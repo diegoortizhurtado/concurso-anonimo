@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 // === CONFIG ===
 const GAS_BASE =
-  "https://script.google.com/macros/s/AKfycbwmD2GzzontGGC1ceIYBxzOPXFIg1qDsBa8qdmoZ6VNcH4UvVTn4LmxaROxiEM4uoQ0/exec";
+  "https://script.google.com/macros/s/AKfycbyHiEikjzV9zB6nF8Hz8-HkTm-9_mz9fN9IX6cjDo6bRseaftiXzH54zrrcAB4/exec";
 const STAND_COUNT = 4;
 
 // === HELPERS ===
@@ -21,7 +21,11 @@ function hideQueryString(): void {
 async function fetchJson<T = any>(url: string, opts: RequestInit = {}): Promise<T> {
   const res = await fetch(url, opts);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json() as Promise<T>;
+  try {
+    return (await res.json()) as T;
+  } catch {
+    return {} as T;
+  }
 }
 
 // === TYPES ===
@@ -54,10 +58,11 @@ export default function App() {
       try {
         const id = await ensureAnonId();
         setAnonId(id);
+
         if (standParam) {
           const sid = Number(standParam);
           if (!Number.isNaN(sid) && sid >= 1 && sid <= STAND_COUNT) {
-            await handleStandVisit(sid, id);
+            await handleStandVisit(sid);
           } else {
             setStatus("QR inválido: stand desconocido.");
           }
@@ -69,16 +74,28 @@ export default function App() {
     })();
   }, []);
 
-  // Persist visits and trigger report
+  // Persist visits and trigger report automatically when 4 stands visited
   useEffect(() => {
+    if (!anonId) return;
     localStorage.setItem("visits", JSON.stringify(visits));
-    if (!reported && visitsUniqueCount(visits) === STAND_COUNT) {
-      reportComplete(anonId, visits).catch((err) => {
-        console.warn("No se pudo reportar ahora; se dejará pendiente", err);
-        queuePendingReport(anonId, visits);
-      });
+
+    if (reported) return;
+
+    if (visitsUniqueCount(visits) === STAND_COUNT) {
+      console.log("✅ 4 stands completados, reportando a backend...");
+      reportComplete(anonId, visits)
+        .then(() => {
+          setReported(true);
+          localStorage.setItem("reported", "true");
+          setStatus("✅ ¡Reporte enviado al backend con éxito!");
+        })
+        .catch((err) => {
+          console.warn("⚠️ No se pudo reportar ahora; guardando pendiente", err);
+          queuePendingReport(anonId, visits);
+          setStatus("⚠️ Error de red, se guardó el reporte pendiente.");
+        });
     }
-  }, [visits]);
+  }, [visits, anonId]);
 
   async function ensureAnonId(): Promise<string> {
     const cached = localStorage.getItem("anonId");
@@ -94,7 +111,7 @@ export default function App() {
     return new Set(visArr.map((v) => v.stand)).size;
   }
 
-  async function handleStandVisit(stand: number, id: string): Promise<void> {
+  async function handleStandVisit(stand: number): Promise<void> {
     setStatus(`Registrando visita al stand ${stand}...`);
     const already = visits.some((v) => v.stand === stand);
     if (already) {
@@ -106,32 +123,38 @@ export default function App() {
     setStatus(`Visita al stand ${stand} registrada localmente.`);
   }
 
-  async function reportComplete(id: string | null, visitsToReport: Visit[]): Promise<void> {
+  async function reportComplete(id: string, visitsToReport: Visit[]): Promise<void> {
     if (!id) throw new Error("anonId missing");
-    setStatus("Reportando visita completa al backend...");
+
     const payload = {
       action: "reportComplete",
       anonId: id,
       visits: visitsToReport,
       timestamp: new Date().toISOString(),
     };
-    const res = await fetchJson<{ success: boolean }>(GAS_BASE + "?action=reportComplete", {
+
+    console.log("📤 Enviando reporte completo a GAS:", payload);
+
+    const res = await fetch(GAS_BASE, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    if (res && res.success) {
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json().catch(() => ({}));
+
+    if (data && (data.success || data.status === "ok")) {
+      console.log("✅ Reporte recibido por GAS");
+      clearPendingReport(id);
       localStorage.setItem("reported", "true");
       setReported(true);
-      setStatus("¡Registro completo reportado con éxito!");
-      clearPendingReport(id);
     } else {
       throw new Error("Backend no devolvió éxito");
     }
   }
 
-  function queuePendingReport(id: string | null, visitsToReport: Visit[]) {
-    if (!id) return;
+  function queuePendingReport(id: string, visitsToReport: Visit[]) {
     const pending = JSON.parse(localStorage.getItem("pendingReports") || "[]");
     pending.push({ anonId: id, visits: visitsToReport, ts: new Date().toISOString() });
     localStorage.setItem("pendingReports", JSON.stringify(pending));
@@ -147,7 +170,7 @@ export default function App() {
     const pending = JSON.parse(localStorage.getItem("pendingReports") || "[]");
     for (const p of pending) {
       try {
-        await fetchJson(GAS_BASE + "?action=reportComplete", {
+        await fetch(GAS_BASE, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -214,8 +237,9 @@ export default function App() {
         </div>
 
         <p className="note">
-          Nota: el QR debe apuntar a la URL del deploy con <code>?stand=1</code>,{" "}
-          <code>?stand=2</code>, etc. El parámetro se oculta tras leerlo.
+          Nota: el QR debe apuntar a la URL del deploy con{" "}
+          <code>?stand=1</code>, <code>?stand=2</code>, etc. El parámetro se
+          oculta tras leerlo.
         </p>
       </div>
     </div>
