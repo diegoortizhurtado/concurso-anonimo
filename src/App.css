@@ -1,79 +1,135 @@
-.App {
-  min-height: 100vh;
+:root {
+  --rojo: #8b0000;
+  --negro: #111;
+  --blanco: #fff;
+}
+
+body {
+  background-color: var(--negro);
+  color: var(--blanco);
+  font-family: "Poppins", sans-serif;
+  margin: 0;
+  padding: 0;
   display: flex;
-  align-items: center;
   justify-content: center;
-  background-color: #f8fafc;
+  align-items: center;
+  min-height: 100vh;
+}
+
+.App {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
   padding: 1rem;
-  font-family: system-ui, sans-serif;
 }
 
 .card {
-  background: white;
-  border-radius: 1rem;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+  background: #1b1b1b;
+  border-radius: 16px;
+  box-shadow: 0 0 20px rgba(255, 255, 255, 0.1);
   padding: 2rem;
-  max-width: 480px;
   width: 100%;
+  max-width: 600px;
+  text-align: center;
+  border: 2px solid var(--rojo);
 }
 
-h1 {
-  font-size: 1.5rem;
-  margin-bottom: 0.5rem;
+.card h1 {
+  color: var(--rojo);
+  margin-bottom: 1rem;
 }
 
-h2 {
-  margin-top: 1rem;
-  font-size: 1.1rem;
+.anon-section {
+  margin: 2rem 0;
+}
+
+.anon-id-display {
+  font-size: 4rem;
+  font-weight: 700;
+  background: var(--rojo);
+  color: var(--blanco);
+  padding: 1rem 2rem;
+  border-radius: 12px;
+  display: inline-block;
+  width: 80%;
+  max-width: 400px;
+  margin: 0 auto;
+  box-shadow: 0 0 15px rgba(139, 0, 0, 0.5);
 }
 
 .progress ul {
   list-style: none;
-  padding-left: 0;
-  margin: 0.5rem 0;
+  padding: 0;
+  margin: 0;
 }
 
 .progress li {
-  margin: 0.25rem 0;
+  padding: 0.5rem 0;
+  font-size: 1.1rem;
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
 }
 
-.status p {
-  background: #f1f5f9;
-  border-radius: 0.5rem;
-  padding: 0.5rem;
+.check {
+  color: #0f0;
+}
+
+.dash {
+  color: #999;
+}
+
+.status {
+  margin-top: 1.5rem;
+  background: #222;
+  border-radius: 8px;
+  padding: 1rem;
 }
 
 .actions {
+  margin-top: 1.5rem;
   display: flex;
-  gap: 0.5rem;
-  margin-top: 1rem;
+  justify-content: center;
+  gap: 1rem;
+  flex-wrap: wrap;
 }
 
 button {
-  flex: 1;
+  background: var(--rojo);
+  color: var(--blanco);
   border: none;
-  border-radius: 0.5rem;
-  padding: 0.5rem 1rem;
-  background: #2563eb;
-  color: white;
+  padding: 0.8rem 1.5rem;
+  border-radius: 8px;
   cursor: pointer;
-  transition: background 0.2s ease-in-out;
+  transition: background 0.2s;
 }
 
 button:hover {
-  background: #1d4ed8;
+  background: #a00000;
 }
 
 button.danger {
-  background: #ef4444;
+  background: #333;
 }
 
 button.danger:hover {
-  background: #dc2626;
+  background: #444;
 }
 
-.note {
-  margin-top: 1rem;
-  font-size: 0.8rem;
-  color: #64748b;
+.note.hidden {
+  display: none;
 }
+
+/* RESPONSIVE */
+@media (max-width: 600px) {
+  .anon-id-display {
+    font-size: 2.5rem;
+    width: 100%;
+  }
+
+  .card {
+    padding: 1.5rem;
+  }
+}
+  

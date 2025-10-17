@@ -223,9 +223,11 @@ export default function App() {
     <div className="App">
       <div className="card">
         <h1>Registro anónimo de stands</h1>
-        <p>
-          Anónimo ID: <strong>{anonId || "(generando...)"}</strong>
-        </p>
+
+        <div className="anon-section">
+          <h2>Tu código anónimo</h2>
+          <div className="anon-id-display">{anonId || "…"}</div>
+        </div>
 
         <div className="progress">
           <h2>Progreso</h2>
@@ -235,7 +237,12 @@ export default function App() {
           <ul>
             {Array.from({ length: STAND_COUNT }, (_, i) => i + 1).map((s) => (
               <li key={s}>
-                Stand {s} {visits.some((v) => v.stand === s) ? "✅" : "—"}
+                Stand {s}{" "}
+                {visits.some((v) => v.stand === s) ? (
+                  <span className="check">✅</span>
+                ) : (
+                  <span className="dash">—</span>
+                )}
               </li>
             ))}
           </ul>
@@ -253,10 +260,10 @@ export default function App() {
           </button>
         </div>
 
-        <p className="note">
-          Nota: el QR debe apuntar a la URL del deploy con{" "}
-          <code>?stand=1</code>, <code>?stand=2</code>, etc. El parámetro se
-          oculta tras leerlo.
+        {/* Nota oculta visualmente, pero visible en el DOM */}
+        <p className="note hidden">
+          Nota: el QR debe apuntar a la URL del deploy con ?stand=1, ?stand=2, etc.
+          El parámetro se oculta tras leerlo.
         </p>
       </div>
     </div>
